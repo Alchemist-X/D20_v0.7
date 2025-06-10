@@ -16,7 +16,8 @@ describe("d20-binary-options", () => {
   it("Creates a pool", async () => {
     const pool = anchor.web3.Keypair.generate();
     const creator = provider.wallet.publicKey;
-    
+    console.log(1111);
+
     const targetPrice = 100 * LAMPORTS_PER_SOL; // 100 SOL
     const expiry = Math.floor(Date.now() / 1000) + 3600; // 1小时后
     const amount = 1 * LAMPORTS_PER_SOL; // 1 SOL

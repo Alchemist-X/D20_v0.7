@@ -1,7 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::native_token::LAMPORTS_PER_SOL;
-use anchor_lang::solana_program::system_instruction;
-use pyth_sdk_solana::load_price_feed_from_account_info;
 
 declare_id!("9L4vos4SJyyKtgiVjKsPQxPKbtwYsMuCcbcrkxaLsaQj");
 
@@ -19,6 +16,7 @@ pub mod d20_binary_options {
         ctx: Context<CreatePool>,
         meme_token: Pubkey,
         target_price: u64,
+        current_price: u64, // 当前价格作为参数传入
         expiry: i64,
         amount: u64,
         side: u8, // 0: 高于, 1: 低于
@@ -29,24 +27,18 @@ pub mod d20_binary_options {
         require!(expiry > clock.unix_timestamp, ErrorCode::InvalidExpiry);
         require!(amount > 0, ErrorCode::InvalidAmount);
         require!(side <= 1, ErrorCode::InvalidSide);
-
-        // 验证当前价格
-        let price_feed = load_price_feed_from_account_info(&ctx.accounts.price_feed)?;
-        let current_price = price_feed.get_current_price().unwrap();
-        require!(current_price.price > 0, ErrorCode::InvalidPrice);
+        require!(current_price > 0, ErrorCode::InvalidPrice);
 
         // 转移SOL到程序账户
-        let transfer_ix = system_instruction::transfer(
-            &ctx.accounts.creator.key(),
-            &pool.key(),
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.creator.to_account_info(),
+                    to: pool.to_account_info(),
+                },
+            ),
             amount,
-        );
-        anchor_lang::solana_program::program::invoke(
-            &transfer_ix,
-            &[
-                ctx.accounts.creator.to_account_info(),
-                pool.to_account_info(),
-            ],
         )?;
 
         pool.meme_token = meme_token;
@@ -75,23 +67,16 @@ pub mod d20_binary_options {
         require!(amount > 0, ErrorCode::InvalidAmount);
         require!(pool.opponent_amount == 0, ErrorCode::PoolAlreadyJoined);
 
-        // 验证当前价格
-        let price_feed = load_price_feed_from_account_info(&ctx.accounts.price_feed)?;
-        let current_price = price_feed.get_current_price().unwrap();
-        require!(current_price.price > 0, ErrorCode::InvalidPrice);
-
         // 转移SOL到程序账户
-        let transfer_ix = system_instruction::transfer(
-            &ctx.accounts.opponent.key(),
-            &pool.key(),
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.opponent.to_account_info(),
+                    to: pool.to_account_info(),
+                },
+            ),
             amount,
-        );
-        anchor_lang::solana_program::program::invoke(
-            &transfer_ix,
-            &[
-                ctx.accounts.opponent.to_account_info(),
-                pool.to_account_info(),
-            ],
         )?;
 
         pool.opponent_amount = amount;
@@ -102,6 +87,7 @@ pub mod d20_binary_options {
     // 结算赌约
     pub fn settle_pool(
         ctx: Context<SettlePool>,
+        final_price: u64, // 最终价格作为参数传入
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         let clock = Clock::get()?;
@@ -109,21 +95,16 @@ pub mod d20_binary_options {
         require!(pool.status == 0, ErrorCode::PoolNotActive);
         require!(clock.unix_timestamp >= pool.expiry, ErrorCode::PoolNotExpired);
         require!(pool.opponent_amount > 0, ErrorCode::PoolNotJoined);
-
-        // 获取当前价格
-        let price_feed = load_price_feed_from_account_info(&ctx.accounts.price_feed)?;
-        let current_price = price_feed.get_current_price().unwrap();
-        require!(current_price.price > 0, ErrorCode::InvalidPrice);
+        require!(final_price > 0, ErrorCode::InvalidPrice);
 
         // 判断胜负
         let creator_wins = if pool.creator_side == 0 {
-            current_price.price as u64 > pool.target_price
+            final_price > pool.target_price
         } else {
-            current_price.price as u64 < pool.target_price
+            final_price < pool.target_price
         };
 
         // 计算收益
-        let total_pool = pool.creator_amount + pool.opponent_amount;
         let winner_amount = std::cmp::min(pool.creator_amount, pool.opponent_amount) * 2;
 
         // 设置获胜者并转移资金
@@ -131,12 +112,12 @@ pub mod d20_binary_options {
             pool.winner = Some(pool.creator);
             // 转移资金给创建者
             **pool.to_account_info().try_borrow_mut_lamports()? -= winner_amount;
-            **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? += winner_amount;
+            **ctx.accounts.creator.to_account_info().try_borrow_mut_lamports()? += winner_amount;
         } else {
-            pool.winner = Some(ctx.accounts.pool.key());
+            pool.winner = Some(ctx.accounts.opponent.key());
             // 转移资金给对手
             **pool.to_account_info().try_borrow_mut_lamports()? -= winner_amount;
-            **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? += winner_amount;
+            **ctx.accounts.opponent.to_account_info().try_borrow_mut_lamports()? += winner_amount;
         }
 
         pool.status = 1;
@@ -186,8 +167,6 @@ pub struct CreatePool<'info> {
     pub pool: Account<'info, GamblingPool>,
     #[account(mut)]
     pub creator: Signer<'info>,
-    /// CHECK: This is the Pyth price account we want to read
-    pub price_feed: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -197,8 +176,6 @@ pub struct JoinPool<'info> {
     pub pool: Account<'info, GamblingPool>,
     #[account(mut)]
     pub opponent: Signer<'info>,
-    /// CHECK: This is the Pyth price account we want to read
-    pub price_feed: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -206,8 +183,10 @@ pub struct JoinPool<'info> {
 pub struct SettlePool<'info> {
     #[account(mut)]
     pub pool: Account<'info, GamblingPool>,
-    /// CHECK: This is the Pyth price account we want to read
-    pub price_feed: AccountInfo<'info>,
+    #[account(mut)]
+    pub creator: SystemAccount<'info>,
+    #[account(mut)]
+    pub opponent: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -215,7 +194,6 @@ pub struct SettlePool<'info> {
 pub struct ClearPool<'info> {
     #[account(mut)]
     pub pool: Account<'info, GamblingPool>,
-    // TODO: Chainlink 预言机账户、PDA等
 }
 
 #[error_code]
