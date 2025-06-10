@@ -1,0 +1,45 @@
+# Anchor
+.anchor
+target/
+**/*.rs.bk
+node_modules/
+
+# Solana
+test-ledger/
+.config/
+
+# IDL
+**/*.so
+
+# typescript
+*.tsbuildinfo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Dependency directories
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local 
