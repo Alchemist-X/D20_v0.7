@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::sysvar::rent::Rent;
 
 declare_id!("9L4vos4SJyyKtgiVjKsPQxPKbtwYsMuCcbcrkxaLsaQj");
 
@@ -84,7 +85,7 @@ pub mod d20_binary_options {
         Ok(())
     }
 
-    // 结算赌约
+    // 结算赌约 - 只更新状态，不转移资金
     pub fn settle_pool(
         ctx: Context<SettlePool>,
         final_price: u64, // 最终价格作为参数传入
@@ -104,23 +105,43 @@ pub mod d20_binary_options {
             final_price < pool.target_price
         };
 
-        // 计算收益
-        let winner_amount = std::cmp::min(pool.creator_amount, pool.opponent_amount) * 2;
-
-        // 设置获胜者并转移资金
+        // 设置获胜者
         if creator_wins {
             pool.winner = Some(pool.creator);
-            // 转移资金给创建者
-            **pool.to_account_info().try_borrow_mut_lamports()? -= winner_amount;
-            **ctx.accounts.creator.to_account_info().try_borrow_mut_lamports()? += winner_amount;
         } else {
             pool.winner = Some(ctx.accounts.opponent.key());
-            // 转移资金给对手
-            **pool.to_account_info().try_borrow_mut_lamports()? -= winner_amount;
-            **ctx.accounts.opponent.to_account_info().try_borrow_mut_lamports()? += winner_amount;
         }
 
+        // 更新状态为已结算
         pool.status = 1;
+
+        Ok(())
+    }
+
+    // 提取奖金 - 获胜者调用此函数提取奖金
+    pub fn claim_prize(ctx: Context<ClaimPrize>) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        
+        require!(pool.status == 1, ErrorCode::PoolNotSettled);
+        require!(pool.winner.is_some(), ErrorCode::NoWinner);
+        require!(pool.winner.unwrap() == ctx.accounts.winner.key(), ErrorCode::NotWinner);
+
+        // 计算总奖金
+        let pool_lamports = pool.to_account_info().lamports();
+        let rent = Rent::get()?;
+        let rent_exempt_balance = rent.minimum_balance(pool.to_account_info().data_len());
+        
+        // 只转移超过租金豁免的部分
+        if pool_lamports > rent_exempt_balance {
+            let prize_amount = pool_lamports - rent_exempt_balance;
+            
+            // 转移奖金给获胜者
+            **pool.to_account_info().try_borrow_mut_lamports()? -= prize_amount;
+            **ctx.accounts.winner.try_borrow_mut_lamports()? += prize_amount;
+        }
+
+        // 标记奖金已提取
+        pool.status = 2; // 2 表示已提取奖金
 
         Ok(())
     }
@@ -163,7 +184,13 @@ pub struct Config {
 // 指令上下文
 #[derive(Accounts)]
 pub struct CreatePool<'info> {
-    #[account(init, payer = creator, space = 8 + 32 + 8 + 8 + 32 + 8 + 1 + 8 + 1 + 32)]
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + 32 + 8 + 8 + 32 + 8 + 1 + 8 + 1 + 33,
+        seeds = [b"pool", creator.key().as_ref()],
+        bump
+    )]
     pub pool: Account<'info, GamblingPool>,
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -183,10 +210,12 @@ pub struct JoinPool<'info> {
 pub struct SettlePool<'info> {
     #[account(mut)]
     pub pool: Account<'info, GamblingPool>,
+    /// CHECK: This is safe because we only transfer lamports and do not read/write data
     #[account(mut)]
-    pub creator: SystemAccount<'info>,
+    pub creator: AccountInfo<'info>,
+    /// CHECK: This is safe because we only transfer lamports and do not read/write data
     #[account(mut)]
-    pub opponent: SystemAccount<'info>,
+    pub opponent: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -194,6 +223,14 @@ pub struct SettlePool<'info> {
 pub struct ClearPool<'info> {
     #[account(mut)]
     pub pool: Account<'info, GamblingPool>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimPrize<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, GamblingPool>,
+    #[account(mut)]
+    pub winner: Signer<'info>,
 }
 
 #[error_code]
@@ -216,4 +253,10 @@ pub enum ErrorCode {
     PoolNotJoined,
     #[msg("Invalid price from oracle")]
     InvalidPrice,
+    #[msg("Pool is not settled yet")]
+    PoolNotSettled,
+    #[msg("No winner determined")]
+    NoWinner,
+    #[msg("Not the winner")]
+    NotWinner,
 }

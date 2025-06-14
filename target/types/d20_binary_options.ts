@@ -14,6 +14,31 @@ export type D20BinaryOptions = {
   },
   "instructions": [
     {
+      "name": "claimPrize",
+      "discriminator": [
+        157,
+        233,
+        139,
+        121,
+        246,
+        62,
+        234,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "winner",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "createPool",
       "discriminator": [
         233,
@@ -29,7 +54,23 @@ export type D20BinaryOptions = {
         {
           "name": "pool",
           "writable": true,
-          "signer": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              }
+            ]
+          }
         },
         {
           "name": "creator",
@@ -215,6 +256,21 @@ export type D20BinaryOptions = {
       "code": 6008,
       "name": "invalidPrice",
       "msg": "Invalid price from oracle"
+    },
+    {
+      "code": 6009,
+      "name": "poolNotSettled",
+      "msg": "Pool is not settled yet"
+    },
+    {
+      "code": 6010,
+      "name": "noWinner",
+      "msg": "No winner determined"
+    },
+    {
+      "code": 6011,
+      "name": "notWinner",
+      "msg": "Not the winner"
     }
   ],
   "types": [
