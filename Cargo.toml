@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "programs/*"
+    "programs/binary_option"
 ]
 resolver = "2"
 
