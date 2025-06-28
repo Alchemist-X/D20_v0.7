@@ -8,3 +8,8 @@ test-ledger
 
 Cargo.lock
 yarn.lock
+
+deploy.ts
+.env
+scripts
+Anchor.toml.real

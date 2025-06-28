@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::rent::Rent;
 
-declare_id!("9L4vos4SJyyKtgiVjKsPQxPKbtwYsMuCcbcrkxaLsaQj");
+declare_id!("HC2L1MCeKvd9EgvjrahyGRk3FbZwBnUUz3L4BHYHKf8i");
 
 #[program]
 pub mod d20_binary_options {
@@ -52,7 +52,7 @@ pub mod d20_binary_options {
         require!(side <= 1, ErrorCode::InvalidSide);
         require!(target_price > 0, ErrorCode::InvalidPrice);
         require!(expiry <= clock.unix_timestamp + 7 * 24 * 3600, ErrorCode::ExpiryTooFar); // Max 7 days
-        require!(amount >= 1_000_000_000, ErrorCode::AmountTooSmall); // Min 1 SOL
+        require!(amount >= 10_000_000, ErrorCode::AmountTooSmall); // Min 0.01 SOL
 
         // Calculate fees
         let create_fee = config.create_fee;
