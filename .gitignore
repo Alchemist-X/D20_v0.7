@@ -13,3 +13,4 @@ deploy.ts
 .env
 scripts
 Anchor.toml.real
+!scripts/settle-pool.ts

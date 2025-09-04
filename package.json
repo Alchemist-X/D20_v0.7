@@ -6,10 +6,13 @@
     "listen": "ts-node listener/listener.ts",
     "listen:historical": "ts-node listener/listener.ts --historical-only",
     "init-config": "ts-node scripts/initialize-config.ts",
-    "create-pool": "ts-node scripts/create-pool.ts"
+    "create-pool": "ts-node scripts/create-pool.ts",
+    "settle-pool": "ts-node scripts/settle-pool.ts",
+    "scan-history": "ts-node listener/listener_frontend.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
+    "@pythnetwork/client": "^2.22.1",
     "dotenv": "^17.0.0"
   },
   "devDependencies": {

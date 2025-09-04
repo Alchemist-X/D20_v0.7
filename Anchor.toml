@@ -6,16 +6,18 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-binary_option = "HC2L1MCeKvd9EgvjrahyGRk3FbZwBnUUz3L4BHYHKf8i"
+binary_option = "ATvmQTJT6JV9eYvBeyDacN9tGUKA4P5ykmxF9zK49CFr"
 
 [programs.testnet]
-binary_option = "HC2L1MCeKvd9EgvjrahyGRk3FbZwBnUUz3L4BHYHKf8i"
+binary_option = "ATvmQTJT6JV9eYvBeyDacN9tGUKA4P5ykmxF9zK49CFr"
 
 [programs.devnet]
-binary_option = "HC2L1MCeKvd9EgvjrahyGRk3FbZwBnUUz3L4BHYHKf8i"
+binary_option = "ATvmQTJT6JV9eYvBeyDacN9tGUKA4P5ykmxF9zK49CFr"
 
 [registry]
 url = "https://api.apr.dev"
+
+
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

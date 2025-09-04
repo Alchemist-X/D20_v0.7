@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::rent::Rent;
 
-declare_id!("HC2L1MCeKvd9EgvjrahyGRk3FbZwBnUUz3L4BHYHKf8i");
+declare_id!("ATvmQTJT6JV9eYvBeyDacN9tGUKA4P5ykmxF9zK49CFr");
 
 #[program]
 pub mod d20_binary_options {
@@ -26,7 +26,7 @@ pub mod d20_binary_options {
         config.oracle = ctx.accounts.oracle.key();
         config.next_pool_id = 1; // Start pool IDs from 1
         
-        msg!("Binary Options Config initialized");
+        // Config initialized
         Ok(())
     }
 
@@ -330,34 +330,64 @@ pub mod d20_binary_options {
         Ok(())
     }
 
-    // NOTE: we currently do NOT allow cancelling pools
-    // pub fn cancel_pool(ctx: Context<CancelPool>) -> Result<()> {
-    //     let pool = &mut ctx.accounts.pool;
+    pub fn cancel_pool(ctx: Context<CancelPool>) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        let clock = Clock::get()?;
 
-    //     require!(pool.status == PoolStatus::Active as u8, ErrorCode::PoolNotActive);
-    //     require!(pool.opponent.is_none(), ErrorCode::PoolAlreadyJoined);
-    //     require!(ctx.accounts.creator.key() == pool.creator, ErrorCode::NotCreator);
+        // Security checks
+        require!(pool.status == PoolStatus::Active as u8, ErrorCode::PoolNotActive);
+        require!(ctx.accounts.admin.key() == ctx.accounts.config.admin, ErrorCode::NotAdmin);
 
-    //     // Refund creator's stake
-    //     let pool_lamports = pool.to_account_info().lamports();
-    //     let rent = Rent::get()?;
-    //     let rent_exempt_balance = rent.minimum_balance(pool.to_account_info().data_len());
+        // Process refunds from remaining accounts
+        // Remaining accounts should be pairs: [user_bet_account, user_account, user_bet_account, user_account, ...]
+        let remaining_accounts = &ctx.remaining_accounts;
+        require!(remaining_accounts.len() % 2 == 0, ErrorCode::InvalidAmount);
+
+        let mut total_refunded = 0u64;
         
-    //     if pool_lamports > rent_exempt_balance {
-    //         let refund_amount = pool_lamports - rent_exempt_balance;
-    //         **pool.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
-    //         **ctx.accounts.creator.try_borrow_mut_lamports()? += refund_amount;
-    //     }
+        for chunk in remaining_accounts.chunks(2) {
+            let user_bet_info = &chunk[0];
+            let user_info = &chunk[1];
+            
+            // Deserialize user bet account
+            let mut user_bet_data = user_bet_info.try_borrow_mut_data()?;
+            let user_bet = UserBet::try_deserialize(&mut user_bet_data.as_ref())?;
+            
+            // Validate user bet belongs to this pool and user
+            require!(user_bet.pool_id == pool.id, ErrorCode::InvalidPoolId);
+            require!(user_bet.user == user_info.key(), ErrorCode::NotCreator);
+            require!(!user_bet.claimed, ErrorCode::AlreadyClaimed);
+            require!(user_bet.amount > 0, ErrorCode::InvalidAmount);
+            
+            // Transfer refund from pool to user
+            **pool.to_account_info().try_borrow_mut_lamports()? -= user_bet.amount;
+            **user_info.try_borrow_mut_lamports()? += user_bet.amount;
+            
+            total_refunded = total_refunded.checked_add(user_bet.amount).ok_or(ErrorCode::Overflow)?;
+            
+            // Store amount and user key before moving user_bet
+            let refund_amount = user_bet.amount;
+            let user_key = user_info.key();
+            
+            // Mark user bet as claimed
+            let mut updated_user_bet = user_bet;
+            updated_user_bet.claimed = true;
+            updated_user_bet.try_serialize(&mut user_bet_data.as_mut())?;
+            
+            // Refunded lamports to user
+        }
 
-    //     pool.status = PoolStatus::Cancelled as u8;
+        // Update pool status to cancelled
+        pool.status = PoolStatus::Cancelled as u8;
 
-    //     emit!(PoolCancelled {
-    //         pool: pool.key(),
-    //         creator: pool.creator,
-    //     });
+        emit!(PoolCancelled {
+            pool: pool.key(),
+            creator: pool.creator,
+        });
 
-    //     Ok(())
-    // }
+        // Pool cancelled by admin
+        Ok(())
+    }
 
     pub fn update_config(
         ctx: Context<UpdateConfig>,
@@ -380,7 +410,7 @@ pub mod d20_binary_options {
         config.settle_fee_bps = settle_fee_bps;
         config.oracle = oracle;
         
-        msg!("Binary Options Config updated");
+        // Config updated
         Ok(())
     }
 }
@@ -538,9 +568,11 @@ pub struct ClaimPrize<'info> {
 pub struct CancelPool<'info> {
     #[account(mut)]
     pub pool: Account<'info, GamblingPool>,
-    #[account(mut)]
-    pub creator: Signer<'info>,
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, Config>,
+    pub admin: Signer<'info>,
 }
+
 
 #[derive(Accounts)]
 pub struct UpdateConfig<'info> {
@@ -598,6 +630,7 @@ pub struct PoolCancelled {
     pub creator: Pubkey,
 }
 
+
 #[error_code]
 pub enum ErrorCode {
     #[msg("Invalid expiry time")]
@@ -648,4 +681,6 @@ pub enum ErrorCode {
     AlreadyClaimed,
     #[msg("Invalid fee vault")]
     InvalidFeeVault,
+    #[msg("Cancellation window has closed")]
+    CancellationWindowClosed,
 }

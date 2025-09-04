@@ -8,6 +8,8 @@ Binary Option on Solana - Customized Betting Protocol
 # build the program
 anchor build 
 
+# prepare gas token for the solana address
+anchor deploy
 # run the tests
 anchor test
 ```

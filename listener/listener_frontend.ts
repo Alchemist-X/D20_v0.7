@@ -21,12 +21,12 @@ interface PoolCreatedEvent {
   expiry: BN;
 }
 
-class PoolCreatedListener {
+class HistoricalPoolScanner {
   private connection: Connection;
   private program: Program<D20BinaryOptions>;
 
-  constructor() {
-    this.connection = new Connection(RPC_ENDPOINT, 'confirmed');
+  constructor(rpcEndpoint: string = RPC_ENDPOINT) {
+    this.connection = new Connection(rpcEndpoint, 'confirmed');
     
     // Create a dummy provider for program initialization
     const provider = new AnchorProvider(
@@ -36,59 +36,6 @@ class PoolCreatedListener {
     );
     
     this.program = new Program(idl as D20BinaryOptions, provider);
-  }
-
-  /**
-   * Start listening for PoolCreated events
-   */
-  async startListening(): Promise<void> {
-    console.log('🚀 Starting PoolCreated event listener...');
-    console.log(`📡 RPC Endpoint: ${RPC_ENDPOINT}`);
-    console.log(`🏠 Program ID: ${PROGRAM_ID.toString()}`);
-    
-    try {
-      // Subscribe to PoolCreated events
-      const eventListener = this.program.addEventListener('poolCreated', (event: PoolCreatedEvent) => {
-        this.handlePoolCreated(event);
-      });
-
-      console.log('✅ Event listener started successfully');
-      console.log('📦 Listening for PoolCreated events...\n');
-
-      // Keep the process running
-      process.on('SIGINT', () => {
-        console.log('\n⏹️  Stopping event listener...');
-        this.program.removeEventListener(eventListener);
-        process.exit(0);
-      });
-
-    } catch (error) {
-      console.error('❌ Error starting event listener:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Handle PoolCreated event
-   */
-  private handlePoolCreated(event: PoolCreatedEvent): void {
-    console.log('🎉 NEW POOL CREATED EVENT DETECTED!');
-    console.log('=========================================');
-    console.log(`🏊 Pool Address: ${event.pool.toString()}`);
-    console.log(`👤 Creator: ${event.creator.toString()}`);
-    console.log(`🪙 Meme Token: ${event.memeToken.toString()}`);
-    console.log(`🎯 Target Price: ${event.targetPrice.toString()} micro-units`);
-    console.log(`💰 Initial Amount: ${event.amount.toString()} lamports (${event.amount.toNumber() / 1e9} SOL)`);
-    console.log(`📈 Side: ${event.side === 0 ? 'CALL (higher)' : 'PUT (lower)'}`);
-    console.log(`⏰ Expiry: ${new Date(event.expiry.toNumber() * 1000).toISOString()}`);
-    console.log(`⏱️  Event Time: ${new Date().toISOString()}`);
-    console.log('=========================================\n');
-
-    // You can add custom logic here, such as:
-    // - Storing the event in a database
-    // - Sending notifications
-    // - Triggering other automated actions
-    // - Updating a UI in real-time
   }
 
   /**
@@ -143,36 +90,28 @@ class PoolCreatedListener {
   }
 }
 
-// Main execution
+export { HistoricalPoolScanner, PoolCreatedEvent };
+
+// Main execution for standalone usage
 async function main() {
-  const listener = new PoolCreatedListener();
+  const scanner = new HistoricalPoolScanner();
   
   // Check if program is deployed
-  const isDeployed = await listener.checkProgramStatus();
+  const isDeployed = await scanner.checkProgramStatus();
   if (!isDeployed) {
     console.log('📝 Deploy the program first using: anchor deploy --provider.cluster testnet');
     return;
   }
   
-  // Get historical events first (optional)
-  console.log('📋 Checking for existing pools...');
-  await listener.getHistoricalEvents();
+  // Get historical events
+  console.log('📋 Scanning for existing pools...');
+  await scanner.getHistoricalEvents();
   
-  // Start real-time listening
-  await listener.startListening();
+  console.log('✅ Historical scan completed.');
 }
 
-// Handle command line arguments
-const args = process.argv.slice(2);
-if (args.includes('--historical-only')) {
-  // Only fetch historical events
-  const listener = new PoolCreatedListener();
-  listener.getHistoricalEvents().then(() => {
-    console.log('✅ Historical events fetched. Exiting...');
-    process.exit(0);
-  });
-} else {
-  // Run the main listener
+// Run when executed directly
+if (require.main === module) {
   main().catch((error) => {
     console.error('💥 Fatal error:', error);
     process.exit(1);

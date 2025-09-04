@@ -771,4 +771,372 @@ describe("Binary Option Contract Tests", () => {
       expect(pool.winningSide).to.equal(1); // Put side wins
     });
   });
+
+  describe("Pool Cancellation", () => {
+    it("Should allow admin to cancel pool", async () => {
+      // Create a new pool for cancellation testing
+      const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      
+      // Get current config to know next pool ID
+      const config = await program.account.config.fetch(configPda);
+      const nextPoolId = config.nextPoolId;
+      
+      const [cancelPoolPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), nextPoolId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [cancelCreatorBetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), creator.publicKey.toBuffer()],
+        program.programId
+      );
+
+      await program.methods
+        .createPool(MEME_TOKEN, TARGET_PRICE, new BN(expiryTime), STAKE_AMOUNT, 0)
+        .accountsPartial({
+          pool: cancelPoolPda,
+          userBet: cancelCreatorBetPda,
+          config: configPda,
+          creator: creator.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([creator])
+        .rpc();
+
+      // Verify pool is active
+      let pool = await program.account.gamblingPool.fetch(cancelPoolPda);
+      expect(pool.status).to.equal(0); // Active
+
+      // Admin cancels the pool (empty pool - no participants to refund)
+      await program.methods
+        .cancelPool()
+        .accountsPartial({
+          pool: cancelPoolPda,
+          config: configPda,
+          admin: admin.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: cancelCreatorBetPda, isSigner: false, isWritable: true },  // creator bet account
+          { pubkey: creator.publicKey, isSigner: false, isWritable: true },    // creator account
+        ])
+        .signers([admin])
+        .rpc();
+
+      // Verify pool is cancelled
+      pool = await program.account.gamblingPool.fetch(cancelPoolPda);
+      expect(pool.status).to.equal(2); // Cancelled
+    });
+
+    it("Should fail when non-admin tries to cancel pool", async () => {
+      // Create a new pool for testing
+      const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      
+      // Get current config to know next pool ID
+      const config = await program.account.config.fetch(configPda);
+      const nextPoolId = config.nextPoolId;
+      
+      const [unauthorizedPoolPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), nextPoolId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [unauthorizedCreatorBetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), creator.publicKey.toBuffer()],
+        program.programId
+      );
+
+      await program.methods
+        .createPool(MEME_TOKEN, TARGET_PRICE, new BN(expiryTime), STAKE_AMOUNT, 0)
+        .accountsPartial({
+          pool: unauthorizedPoolPda,
+          userBet: unauthorizedCreatorBetPda,
+          config: configPda,
+          creator: creator.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([creator])
+        .rpc();
+
+      // Try to cancel with creator (should fail - no longer allowed)
+      try {
+        await program.methods
+          .cancelPool()
+          .accountsPartial({
+            pool: unauthorizedPoolPda,
+            config: configPda,
+            admin: creator.publicKey, // Creator is not admin
+          })
+          .remainingAccounts([
+            { pubkey: unauthorizedCreatorBetPda, isSigner: false, isWritable: true },
+            { pubkey: creator.publicKey, isSigner: false, isWritable: true },
+          ])
+          .signers([creator])
+          .rpc();
+        
+        expect.fail("Should have failed with NotAdmin error");
+      } catch (error: any) {
+        expect(error.error?.errorMessage || error.message).to.include("Not the admin");
+      }
+
+      // Try to cancel with another user (should fail)
+      try {
+        await program.methods
+          .cancelPool()
+          .accountsPartial({
+            pool: unauthorizedPoolPda,
+            config: configPda,
+            admin: user1.publicKey, // User1 is not admin
+          })
+          .remainingAccounts([
+            { pubkey: unauthorizedCreatorBetPda, isSigner: false, isWritable: true },
+            { pubkey: creator.publicKey, isSigner: false, isWritable: true },
+          ])
+          .signers([user1])
+          .rpc();
+        
+        expect.fail("Should have failed with NotAdmin error");
+      } catch (error: any) {
+        expect(error.error?.errorMessage || error.message).to.include("Not the admin");
+      }
+    });
+
+    it("Should fail to cancel pool that is not active", async () => {
+      // Create and settle a pool first
+      const expiryTime = Math.floor(Date.now() / 1000) + 10; // 10 seconds
+      
+      // Get current config to know next pool ID
+      const config = await program.account.config.fetch(configPda);
+      const nextPoolId = config.nextPoolId;
+      
+      const [settledPoolPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), nextPoolId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [settledCreatorBetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), creator.publicKey.toBuffer()],
+        program.programId
+      );
+
+      await program.methods
+        .createPool(MEME_TOKEN, TARGET_PRICE, new BN(expiryTime), STAKE_AMOUNT, 0)
+        .accountsPartial({
+          pool: settledPoolPda,
+          userBet: settledCreatorBetPda,
+          config: configPda,
+          creator: creator.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([creator])
+        .rpc();
+
+      // Wait for expiry and settle
+      await new Promise(resolve => setTimeout(resolve, 12000)); // 12 seconds
+      
+      await program.methods
+        .settlePool(new BN(1100000))
+        .accountsPartial({
+          pool: settledPoolPda,
+          config: configPda,
+          oracle: oracle.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([oracle])
+        .rpc();
+
+      // Try to cancel settled pool (should fail)
+      try {
+        await program.methods
+          .cancelPool()
+          .accountsPartial({
+            pool: settledPoolPda,
+            config: configPda,
+            admin: admin.publicKey,
+          })
+          .remainingAccounts([
+            { pubkey: settledCreatorBetPda, isSigner: false, isWritable: true },
+            { pubkey: creator.publicKey, isSigner: false, isWritable: true },
+          ])
+          .signers([admin])
+          .rpc();
+        
+        expect.fail("Should have failed with PoolNotActive error");
+      } catch (error: any) {
+        expect(error.error?.errorMessage || error.message).to.include("Pool not active");
+      }
+    });
+
+    it("Should allow multiple participants to claim refunds after cancellation", async () => {
+      // Create a new pool for cancellation testing
+      const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      
+      // Get current config to know next pool ID
+      const config = await program.account.config.fetch(configPda);
+      const nextPoolId = config.nextPoolId;
+      
+      const [refundPoolPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), nextPoolId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [refundCreatorBetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), creator.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const [refundUser1BetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), user1.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const [refundUser2BetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), user2.publicKey.toBuffer()],
+        program.programId
+      );
+
+      // Create pool with creator
+      await program.methods
+        .createPool(MEME_TOKEN, TARGET_PRICE, new BN(expiryTime), STAKE_AMOUNT, 0)
+        .accountsPartial({
+          pool: refundPoolPda,
+          userBet: refundCreatorBetPda,
+          config: configPda,
+          creator: creator.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([creator])
+        .rpc();
+
+      // User1 joins on opposite side
+      await program.methods
+        .joinPool(nextPoolId, STAKE_AMOUNT, 1) // Put side
+        .accountsPartial({
+          pool: refundPoolPda,
+          userBet: refundUser1BetPda,
+          config: configPda,
+          user: user1.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([user1])
+        .rpc();
+
+      // User2 joins on same side as creator
+      await program.methods
+        .joinPool(nextPoolId, STAKE_AMOUNT, 0) // Call side
+        .accountsPartial({
+          pool: refundPoolPda,
+          userBet: refundUser2BetPda,
+          config: configPda,
+          user: user2.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([user2])
+        .rpc();
+
+      // Record balances before cancellation
+      const creatorBalanceBefore = await provider.connection.getBalance(creator.publicKey);
+      const user1BalanceBefore = await provider.connection.getBalance(user1.publicKey);
+      const user2BalanceBefore = await provider.connection.getBalance(user2.publicKey);
+
+      // Admin cancels the pool and refunds all participants in one transaction
+      await program.methods
+        .cancelPool()
+        .accountsPartial({
+          pool: refundPoolPda,
+          config: configPda,
+          admin: admin.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: refundCreatorBetPda, isSigner: false, isWritable: true },  // creator bet account
+          { pubkey: creator.publicKey, isSigner: false, isWritable: true },    // creator account
+          { pubkey: refundUser1BetPda, isSigner: false, isWritable: true },    // user1 bet account  
+          { pubkey: user1.publicKey, isSigner: false, isWritable: true },      // user1 account
+          { pubkey: refundUser2BetPda, isSigner: false, isWritable: true },    // user2 bet account
+          { pubkey: user2.publicKey, isSigner: false, isWritable: true },      // user2 account
+        ])
+        .signers([admin])
+        .rpc();
+
+      // Verify pool is cancelled
+      let pool = await program.account.gamblingPool.fetch(refundPoolPda);
+      expect(pool.status).to.equal(2); // Cancelled status
+
+      // Verify all user bets are marked as claimed
+      const creatorBet = await program.account.userBet.fetch(refundCreatorBetPda);
+      const user1Bet = await program.account.userBet.fetch(refundUser1BetPda);
+      const user2Bet = await program.account.userBet.fetch(refundUser2BetPda);
+      
+      expect(creatorBet.claimed).to.be.true;
+      expect(user1Bet.claimed).to.be.true;
+      expect(user2Bet.claimed).to.be.true;
+
+      // Verify balances increased (approximately - accounting for gas fees)
+      const creatorBalanceAfter = await provider.connection.getBalance(creator.publicKey);
+      const user1BalanceAfter = await provider.connection.getBalance(user1.publicKey);
+      const user2BalanceAfter = await provider.connection.getBalance(user2.publicKey);
+
+      // Each user should have received close to their original stake back
+      expect(creatorBalanceAfter - creatorBalanceBefore).to.be.greaterThan(STAKE_AMOUNT.toNumber() * 0.9); // Allow for some gas fees
+      expect(user1BalanceAfter - user1BalanceBefore).to.be.greaterThan(STAKE_AMOUNT.toNumber() * 0.9);
+      expect(user2BalanceAfter - user2BalanceBefore).to.be.greaterThan(STAKE_AMOUNT.toNumber() * 0.9);
+    });
+
+    it("Should handle empty pool cancellation correctly", async () => {
+      // Create a pool with only creator (no other participants)
+      const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      
+      const config = await program.account.config.fetch(configPda);
+      const nextPoolId = config.nextPoolId;
+      
+      const [emptyPoolPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), nextPoolId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [emptyCreatorBetPda] = web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("user_bet"), nextPoolId.toArrayLike(Buffer, "le", 8), creator.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const creatorBalanceBefore = await provider.connection.getBalance(creator.publicKey);
+
+      await program.methods
+        .createPool(MEME_TOKEN, TARGET_PRICE, new BN(expiryTime), STAKE_AMOUNT, 0)
+        .accountsPartial({
+          pool: emptyPoolPda,
+          userBet: emptyCreatorBetPda,
+          config: configPda,
+          creator: creator.publicKey,
+          feeVault: feeVault.publicKey,
+        })
+        .signers([creator])
+        .rpc();
+
+      // Admin cancels the pool with only creator
+      await program.methods
+        .cancelPool()
+        .accountsPartial({
+          pool: emptyPoolPda,
+          config: configPda,
+          admin: admin.publicKey,
+        })
+        .remainingAccounts([
+          { pubkey: emptyCreatorBetPda, isSigner: false, isWritable: true },
+          { pubkey: creator.publicKey, isSigner: false, isWritable: true },
+        ])
+        .signers([admin])
+        .rpc();
+
+      // Verify pool is cancelled and creator's bet is marked as claimed
+      const pool = await program.account.gamblingPool.fetch(emptyPoolPda);
+      const creatorBet = await program.account.userBet.fetch(emptyCreatorBetPda);
+      
+      expect(pool.status).to.equal(2); // Cancelled status
+      expect(creatorBet.claimed).to.be.true;
+
+      // Verify creator received their refund (approximately)
+      const creatorBalanceAfter = await provider.connection.getBalance(creator.publicKey);
+      expect(creatorBalanceAfter - creatorBalanceBefore).to.be.greaterThan(STAKE_AMOUNT.toNumber() * 0.9);
+    });
+  });
 });
