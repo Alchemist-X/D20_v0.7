@@ -49,12 +49,20 @@ class PoolSettler {
     require('dotenv').config();
     
     const rpcUrl = process.env.RPC_ENDPOINT!;
-    const oracleWalletPath = process.env.ORACLE_WALLET_PATH || process.env.ADMIN_WALLET_PATH!;
+    const oracleWalletPath = process.env.ORACLE_WALLET_PATH!;
+
+    if (!oracleWalletPath) {
+      throw new Error('ORACLE_WALLET_PATH environment variable is required. Please set it in your .env file.');
+    }
     
     this.connection = new Connection(rpcUrl, 'confirmed');
     this.oracleWallet = loadKeypair(oracleWalletPath);
-    this.programId = new PublicKey(process.env.PROGRAM_ID || 'ATvmQTJT6JV9eYvBeyDacN9tGUKA4P5ykmxF9zK49CFr');
+    this.programId = new PublicKey(process.env.PROGRAM_ID);
     
+    if (!process.env.PROGRAM_ID) {
+      throw new Error('PROGRAM_ID environment variable is required. Please set it in your .env file.');
+    }
+
     // Create a wallet interface for the provider
     const wallet = {
       publicKey: this.oracleWallet.publicKey,

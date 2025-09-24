@@ -25,7 +25,7 @@ pub mod d20_binary_options {
         config.settle_fee_bps = settle_fee_bps;
         config.oracle = ctx.accounts.oracle.key();
         config.next_pool_id = 1; // Start pool IDs from 1
-        
+
         // Config initialized
         Ok(())
     }
@@ -399,18 +399,90 @@ pub mod d20_binary_options {
         oracle: Pubkey,
     ) -> Result<()> {
         let config = &mut ctx.accounts.config;
-        
+
         // Only admin can update config
         require!(ctx.accounts.admin.key() == config.admin, ErrorCode::NotAdmin);
-        
+
         config.fee_vault = fee_vault;
         config.create_fee = create_fee;
         config.join_fee_bps = join_fee_bps;
         config.clearing_fee_bps = clearing_fee_bps;
         config.settle_fee_bps = settle_fee_bps;
         config.oracle = oracle;
-        
+
         // Config updated
+        Ok(())
+    }
+
+    pub fn admin_force_close_pool(ctx: Context<AdminForceClosePool>) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        let config = &ctx.accounts.config;
+
+        // Only admin can force close pools
+        require!(ctx.accounts.admin.key() == config.admin, ErrorCode::NotAdmin);
+
+        // Process refunds from remaining accounts
+        let remaining_accounts = &ctx.remaining_accounts;
+        require!(remaining_accounts.len() % 2 == 0, ErrorCode::InvalidAmount);
+
+        let mut total_refunded = 0u64;
+
+        for chunk in remaining_accounts.chunks(2) {
+            let user_bet_info = &chunk[0];
+            let user_info = &chunk[1];
+
+            // Deserialize user bet account
+            let mut user_bet_data = user_bet_info.try_borrow_mut_data()?;
+            let user_bet = UserBet::try_deserialize(&mut user_bet_data.as_ref())?;
+
+            // Validate user bet belongs to this pool and user
+            require!(user_bet.pool_id == pool.id, ErrorCode::InvalidPoolId);
+            require!(user_bet.user == user_info.key(), ErrorCode::NotCreator);
+            require!(!user_bet.claimed, ErrorCode::AlreadyClaimed);
+            require!(user_bet.amount > 0, ErrorCode::InvalidAmount);
+
+            // Transfer refund from pool to user
+            **pool.to_account_info().try_borrow_mut_lamports()? -= user_bet.amount;
+            **user_info.try_borrow_mut_lamports()? += user_bet.amount;
+
+            total_refunded = total_refunded.checked_add(user_bet.amount).ok_or(ErrorCode::Overflow)?;
+
+            // Mark user bet as claimed
+            let mut updated_user_bet = user_bet;
+            updated_user_bet.claimed = true;
+            updated_user_bet.try_serialize(&mut user_bet_data.as_mut())?;
+        }
+
+        // Update pool status to cancelled
+        pool.status = PoolStatus::Cancelled as u8;
+
+        emit!(PoolForceClosed {
+            pool: pool.key(),
+            admin: ctx.accounts.admin.key(),
+            total_refunded,
+        });
+
+        Ok(())
+    }
+
+    pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> Result<()> {
+        let config = &ctx.accounts.config;
+
+        // Only admin can close accounts
+        require!(ctx.accounts.admin.key() == config.admin, ErrorCode::NotAdmin);
+
+        // Transfer remaining lamports to admin
+        let account_lamports = ctx.accounts.account_to_close.to_account_info().lamports();
+        if account_lamports > 0 {
+            **ctx.accounts.account_to_close.to_account_info().try_borrow_mut_lamports()? = 0;
+            **ctx.accounts.admin.try_borrow_mut_lamports()? += account_lamports;
+        }
+
+        emit!(AccountClosed {
+            account: ctx.accounts.account_to_close.key(),
+            lamports_recovered: account_lamports,
+        });
+
         Ok(())
     }
 }
@@ -581,6 +653,27 @@ pub struct UpdateConfig<'info> {
     pub admin: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct AdminForceClosePool<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, GamblingPool>,
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AdminCloseAccount<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    /// CHECK: Account to be closed
+    #[account(mut)]
+    pub account_to_close: AccountInfo<'info>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PoolStatus {
     Active = 0,
@@ -628,6 +721,19 @@ pub struct PrizeClaimed {
 pub struct PoolCancelled {
     pub pool: Pubkey,
     pub creator: Pubkey,
+}
+
+#[event]
+pub struct PoolForceClosed {
+    pub pool: Pubkey,
+    pub admin: Pubkey,
+    pub total_refunded: u64,
+}
+
+#[event]
+pub struct AccountClosed {
+    pub account: Pubkey,
+    pub lamports_recovered: u64,
 }
 
 
