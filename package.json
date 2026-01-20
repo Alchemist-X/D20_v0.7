@@ -6,15 +6,18 @@
     "listen": "ts-node listener/listener.ts",
     "listen:historical": "ts-node listener/listener.ts --historical-only",
     "init-config": "ts-node scripts/initialize-config.ts",
-    "create-pool": "ts-node scripts/create-pool.ts",
-    "settle-pool": "ts-node scripts/settle-pool.ts",
+    "create-market": "ts-node scripts/create-market.ts",
+    "settle-market": "ts-node scripts/settle-market.ts",
+    "list-markets": "ts-node scripts/settle-market.ts list",
     "scan-history": "ts-node listener/listener_frontend.ts",
+    "query-accounts": "ts-node scripts/query-accounts.ts",
     "shutdown": "ts-node scripts/emergency-shutdown.ts full-shutdown",
-    "test": "anchor test",
-    "test:emergency": "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/emergency-shutdown.ts"
+    "cancel-market": "ts-node scripts/emergency-shutdown.ts cancel",
+    "resolve-dispute": "ts-node scripts/emergency-shutdown.ts resolve",
+    "test": "anchor test"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.1",
+    "@coral-xyz/anchor": "0.30.1",
     "@pythnetwork/client": "^2.22.1",
     "dotenv": "^17.0.0"
   },

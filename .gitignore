@@ -15,3 +15,5 @@ scripts
 Anchor.toml.real
 !scripts/settle-pool.ts
 anybet_public_admin.json
+
+prq.md

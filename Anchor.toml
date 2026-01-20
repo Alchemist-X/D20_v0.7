@@ -20,14 +20,14 @@ url = "https://api.apr.dev"
 [provider]
 # cluster = "https://api.testnet.solana.com"
 # cluster = "https://intensive-clean-paper.solana-testnet.quiknode.pro/76f364fd0109ec3264de41cda66377222882e661"
-# cluster = "localnet"
+cluster = "localnet"
 # cluster = "https://api.zan.top/node/v1/solana/devnet/a033bd01d7ba4900ba94d73d34ef1591"
 # cluster = "https://old-aged-fire.solana-devnet.quiknode.pro/1d937efb38c213babe75e869f4015b3df41f2eb4"
 # cluster = "https://old-aged-fire.solana-mainnet.quiknode.pro/1d937efb38c213babe75e869f4015b3df41f2eb4"
 # cluster = "https://api.zan.top/node/v1/solana/mainnet/a033bd01d7ba4900ba94d73d34ef1591"
-cluster = "https://mainnet.helius-rpc.com/?api-key=c47fe7ee-8603-47b5-aedd-807d9448acfd"
-# wallet = "~/.config/solana/admin-wallet.json"
-wallet = "/Users/happy/workspace/chain/solana_binary_option/anybet_public_admin.json"
+# cluster = "https://mainnet.helius-rpc.com/?api-key=c47fe7ee-8603-47b5-aedd-807d9448acfd"
+wallet = "~/.config/solana/id.json"
+# wallet = "/Users/happy/workspace/chain/solana_binary_option/anybet_public_admin.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
