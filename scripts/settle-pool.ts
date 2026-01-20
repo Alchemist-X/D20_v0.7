@@ -309,7 +309,8 @@ class PoolSettler {
       
       // Fallback: return a mock price for testing
       console.log('⚠️ Using mock price for testing');
-      return new BN(105_000_000); // $105 in micro-units
+      // return new BN(219_000_000); // $219 in micro-units
+      return new BN(200_000); // $0.2 in micro-units
       
     } catch (error) {
       console.error('❌ Error fetching price from Pyth:', error);
